@@ -69,12 +69,8 @@ use --force to overwrite. See man page for full list of options.\n"
 #include <string.h>
 #include <stdarg.h>
 #include <stdbool.h>
-#include <getopt.h>
 #include <unistd.h>
 #include <math.h>
-
-extern char *optarg;
-extern int optind, opterr;
 
 #if defined(WIN32) || defined(__WIN32__)
 #  include <fcntl.h>    /* O_BINARY */
@@ -90,6 +86,7 @@ extern int optind, opterr;
 
 #include "rwpng.h"  /* typedefs, common macros, public prototypes */
 #include "lib/libimagequant.h"
+#include "parg.h"
 
 struct pngquant_options {
     liq_attr *liq;
@@ -259,26 +256,26 @@ static void fix_obsolete_options(const unsigned int argc, char *argv[])
 enum {arg_floyd=1, arg_ordered, arg_ext, arg_no_force, arg_iebug,
     arg_transbug, arg_map, arg_posterize, arg_skip_larger, arg_strip};
 
-static const struct option long_options[] = {
-    {"verbose", no_argument, NULL, 'v'},
-    {"quiet", no_argument, NULL, 'q'},
-    {"force", no_argument, NULL, 'f'},
-    {"no-force", no_argument, NULL, arg_no_force},
-    {"floyd", optional_argument, NULL, arg_floyd},
-    {"ordered", no_argument, NULL, arg_ordered},
-    {"nofs", no_argument, NULL, arg_ordered},
-    {"iebug", no_argument, NULL, arg_iebug},
-    {"transbug", no_argument, NULL, arg_transbug},
-    {"ext", required_argument, NULL, arg_ext},
-    {"skip-if-larger", no_argument, NULL, arg_skip_larger},
-    {"output", required_argument, NULL, 'o'},
-    {"speed", required_argument, NULL, 's'},
-    {"quality", required_argument, NULL, 'Q'},
-    {"posterize", required_argument, NULL, arg_posterize},
-    {"strip", no_argument, NULL, arg_strip},
-    {"map", required_argument, NULL, arg_map},
-    {"version", no_argument, NULL, 'V'},
-    {"help", no_argument, NULL, 'h'},
+static const struct parg_option long_options[] = {
+    {"verbose", PARG_NOARG, NULL, 'v'},
+    {"quiet", PARG_NOARG, NULL, 'q'},
+    {"force", PARG_NOARG, NULL, 'f'},
+    {"no-force", PARG_NOARG, NULL, arg_no_force},
+    {"floyd", PARG_OPTARG, NULL, arg_floyd},
+    {"ordered", PARG_NOARG, NULL, arg_ordered},
+    {"nofs", PARG_NOARG, NULL, arg_ordered},
+    {"iebug", PARG_NOARG, NULL, arg_iebug},
+    {"transbug", PARG_NOARG, NULL, arg_transbug},
+    {"ext", PARG_REQARG, NULL, arg_ext},
+    {"skip-if-larger", PARG_NOARG, NULL, arg_skip_larger},
+    {"output", PARG_REQARG, NULL, 'o'},
+    {"speed", PARG_REQARG, NULL, 's'},
+    {"quality", PARG_REQARG, NULL, 'Q'},
+    {"posterize", PARG_REQARG, NULL, arg_posterize},
+    {"strip", PARG_NOARG, NULL, arg_strip},
+    {"map", PARG_REQARG, NULL, arg_map},
+    {"version", PARG_NOARG, NULL, 'V'},
+    {"help", PARG_NOARG, NULL, 'h'},
     {NULL, 0, NULL, 0},
 };
 
@@ -304,9 +301,12 @@ int main(int argc, char *argv[])
 
     fix_obsolete_options(argc, argv);
 
+    struct parg_state ps;
     int opt;
+    int argn = parg_reorder(argc, argv, "Vvqfhs:Q:o:", long_options);
+    parg_init(&ps);
     do {
-        opt = getopt_long(argc, argv, "Vvqfhs:Q:o:", long_options, NULL);
+        opt = parg_getopt_long(&ps, argn, argv, "Vvqfhs:Q:o:", long_options, NULL);
         switch (opt) {
             case 'v':
                 options.verbose = true;
@@ -316,7 +316,7 @@ int main(int argc, char *argv[])
                 break;
 
             case arg_floyd:
-                options.floyd = optarg ? atof(optarg) : 1.f;
+                options.floyd = ps.optarg ? atof(ps.optarg) : 1.f;
                 if (options.floyd < 0 || options.floyd > 1.f) {
                     fputs("--floyd argument must be in 0..1 range\n", stderr);
                     return INVALID_ARGUMENT;
@@ -327,13 +327,13 @@ int main(int argc, char *argv[])
             case 'f': options.force = true; break;
             case arg_no_force: options.force = false; break;
 
-            case arg_ext: newext = optarg; break;
+            case arg_ext: newext = ps.optarg; break;
             case 'o':
                 if (output_file_path) {
                     fputs("--output option can be used only once\n", stderr);
                     return INVALID_ARGUMENT;
                 }
-                output_file_path = optarg; break;
+                output_file_path = ps.optarg; break;
 
             case arg_iebug:
                 // opacities above 238 will be rounded up to 255, because IE6 truncates <255 to 0.
@@ -351,7 +351,7 @@ int main(int argc, char *argv[])
 
             case 's':
                 {
-                    int speed = atoi(optarg);
+                    int speed = atoi(ps.optarg);
                     if (speed >= 10) {
                         options.fast_compression = true;
                     }
@@ -367,14 +367,14 @@ int main(int argc, char *argv[])
                 break;
 
             case 'Q':
-                if (!parse_quality(optarg, options.liq, &options.min_quality_limit)) {
+                if (!parse_quality(ps.optarg, options.liq, &options.min_quality_limit)) {
                     fputs("Quality should be in format min-max where min and max are numbers in range 0-100.\n", stderr);
                     return INVALID_ARGUMENT;
                 }
                 break;
 
             case arg_posterize:
-                if (LIQ_OK != liq_set_min_posterization(options.liq, atoi(optarg))) {
+                if (LIQ_OK != liq_set_min_posterization(options.liq, atoi(ps.optarg))) {
                     fputs("Posterization should be number of bits in range 0-4.\n", stderr);
                     return INVALID_ARGUMENT;
                 }
@@ -387,14 +387,14 @@ int main(int argc, char *argv[])
             case arg_map:
                 {
                     png24_image tmp = {};
-                    if (SUCCESS != read_image(options.liq, optarg, false, &tmp, &options.fixed_palette_image, true, true, false)) {
-                        fprintf(stderr, "  error: unable to load %s", optarg);
+                    if (SUCCESS != read_image(options.liq, ps.optarg, false, &tmp, &options.fixed_palette_image, true, true, false)) {
+                        fprintf(stderr, "  error: unable to load %s", ps.optarg);
                         return INVALID_ARGUMENT;
                     }
                     liq_result *tmp_quantize = liq_quantize_image(options.liq, options.fixed_palette_image);
                     const liq_palette *pal = liq_get_palette(tmp_quantize);
                     if (!pal) {
-                        fprintf(stderr, "  error: unable to read colors from %s", optarg);
+                        fprintf(stderr, "  error: unable to read colors from %s", ps.optarg);
                         return INVALID_ARGUMENT;
                     }
                     for(unsigned int i=0; i < pal->count; i++) {
@@ -419,8 +419,6 @@ int main(int argc, char *argv[])
                 return INVALID_ARGUMENT;
         }
     } while (opt != -1);
-
-    int argn = optind;
 
     if (argn >= argc) {
         if (argn > 1) {
